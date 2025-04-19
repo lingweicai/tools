@@ -1,0 +1,16 @@
+Fork via GitHub UI (Recommended)
+
+    Visit: https://github.com/cockpit-project/starter-kit
+
+    Click the "Fork" button (top-right).
+
+    In the fork dialog:
+
+        Choose your account: lingweicai
+
+        Set the name to easyhpc
+
+    Click Create Fork.
+
+GitHub will automatically create:
+📦 https://github.com/lingweicai/easyhpc

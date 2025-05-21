@@ -1,0 +1,8 @@
+#!/bin/bash
+# add users in slurm group can execute slurm command : sudo scontrol suspend <Job-ID>
+sudo visudo -f /etc/sudoers.d/slurm-group
+#copy below line in the above file
+%slurm ALL=(ALL) NOPASSWD: /usr/bin/scontrol
+
+# add user dev in the slurm group
+usermod -aG slurm dev

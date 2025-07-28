@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Rocky Linux 9: Install & configure XRDP (with XFCE) + Tailscale
+# Usage: sudo bash setup-rdp-tailscale.sh <linux_username>
+set -euo pipefail
+
+########## CONFIG ##########
+TARGET_USER="${1:-${SUDO_USER:-}}"
+TAILSCALE_REPO="https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo"
+XRDP_PORT=3389
+# If you plan to rely ONLY on Tailscale, you can leave FIREWALL_OPEN_PORTS=false
+FIREWALL_OPEN_PORTS=true
+############################
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Please run as root (sudo)."
+  exit 1
+fi
+
+if [[ -z "${TARGET_USER}" ]]; then
+  echo "Usage: sudo $0 <linux_username>"
+  exit 1
+fi
+
+if ! id "${TARGET_USER}" &>/dev/null; then
+  echo "User '${TARGET_USER}' does not exist."
+  exit 1
+fi
+
+USER_HOME=$(eval echo "~${TARGET_USER}")
+
+echo "[1/8] Installing prerequisites (EPEL, dnf plugins)…"
+dnf install -y epel-release dnf-plugins-core
+
+echo "[2/8] Installing XFCE desktop group…"
+dnf groupinstall -y "Xfce"
+
+echo "[3/8] Installing xrdp…"
+dnf install -y xrdp
+
+echo "[4/8] Forcing XFCE for user '${TARGET_USER}' via ~/.Xclients…"
+sudo -u "${TARGET_USER}" bash -c "echo 'startxfce4' > '${USER_HOME}/.Xclients'"
+chmod +x "${USER_HOME}/.Xclients"
+chown "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.Xclients"
+
+echo "[5/8] Disabling Wayland for GDM (needed for xrdp)…"
+GDM_CONF="/etc/gdm/custom.conf"
+if ! grep -q '^WaylandEnable=false' "$GDM_CONF" 2>/dev/null; then
+  sed -ri 's/^#?WaylandEnable=.*/WaylandEnable=false/' "$GDM_CONF" 2>/dev/null || true
+  if ! grep -q '^WaylandEnable=false' "$GDM_CONF"; then
+    # If the line didn't exist, append it
+    echo -e "\n[daemon]\nWaylandEnable=false" >> "$GDM_CONF"
+  fi
+fi
+
+echo "[6/8] Enabling & starting xrdp…"
+systemctl enable --now xrdp
+
+# Optional firewall opening (skip if you only use Tailscale)
+if $FIREWALL_OPEN_PORTS && systemctl is-active --quiet firewalld; then
+  echo "[6b/8] Opening TCP port ${XRDP_PORT} in firewalld…"
+  firewall-cmd --permanent --add-port=${XRDP_PORT}/tcp
+  firewall-cmd --reload
+else
+  echo "[6b/8] Skipping firewall port open (either disabled or not desired)."
+fi
+
+echo "[7/8] Installing Tailscale…"
+if ! dnf repolist | grep -qi tailscale; then
+  dnf config-manager --add-repo "${TAILSCALE_REPO}"
+fi
+dnf install -y tailscale
+
+echo "[8/8] Enabling & starting tailscaled…"
+systemctl enable --now tailscaled
+
+if [[ -n "${TS_AUTHKEY:-}" ]]; then
+  echo "[Optional] TS_AUTHKEY detected – bringing Tailscale up non-interactively…"
+  tailscale up --authkey="${TS_AUTHKEY}" --ssh || {
+    echo "tailscale up failed. You can run it manually later: sudo tailscale up"
+  }
+else
+  echo "No TS_AUTHKEY provided. After this script, run interactively:"
+  echo "  sudo tailscale up"
+fi
+
+echo
+echo "=============================="
+echo " Done!"
+echo " - XRDP is running on port ${XRDP_PORT}."
+echo " - User '${TARGET_USER}' will get XFCE when logging in via RDP."
+echo " - Wayland disabled; you may want to reboot: sudo reboot"
+echo " - Tailscale installed & running (authenticate with: sudo tailscale up)"
+echo "=============================="
